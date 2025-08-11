@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Cursor Reptile — Arrive (No Bounce)</title>
+<style>
+  html,body{margin:0;height:100%;background:#000}
+  canvas{display:block;width:100vw;height:100vh;cursor:crosshair}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<script>
+// ===== Tunables ==============================================================
+const SEGMENTS      = 54;
+const SPACING       = 11.5;
+const FOLLOW_EASE   = 0.55;
+
+// Arrival motion (fixes bounce)
+const MAX_SPEED     = 200;   // px/s overall top speed (lower = slower)
+const MAX_ACCEL     = 700;   // px/s^2 steering limit
+const TARGET_SMOOTH = 0.12;  // 0..1 cursor smoothing
+const SLOW_RADIUS   = 260;   // start braking when inside this distance
+const STOP_RADIUS   = 8;     // snap+stop when closer than this
+const AHEAD_OFFSET  = 10;    // settle a bit ahead of the cursor along heading
+
+// Legs / gait
+const LEG_REACH   = 16;
+const LEG_FWD     = 10;
+const STRIDE_LEN  = 18;
+const STEP_DUR    = 0.22;
+// ============================================================================
+
+// Canvas bootstrap
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+function resize(){
+  const dpr = Math.max(1, devicePixelRatio||1);
+  canvas.width = innerWidth*dpr; canvas.height = innerHeight*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener('resize', resize); resize();
+
+// Pointer + smoothed target
+const raw = {x: innerWidth/2, y: innerHeight/2};
+const target = {x: raw.x, y: raw.y};
+addEventListener('pointermove', e => { raw.x = e.clientX; raw.y = e.clientY; });
+
+// Body chain
+const chain = Array.from({length: SEGMENTS}, (_,i)=>({x: innerWidth/2 + i*SPACING, y: innerHeight/2}));
+let headVel = {x:0, y:0};
+let prevHead = {...chain[0]};
+
+// Helpers
+function follow(prev, cur){
+  const dx=prev.x-cur.x, dy=prev.y-cur.y, len=Math.hypot(dx,dy)||1;
+  const tx = prev.x - dx/len*SPACING;
+  const ty = prev.y - dy/len*SPACING;
+  cur.x += (tx-cur.x)*FOLLOW_EASE;
+  cur.y += (ty-cur.y)*FOLLOW_EASE;
+}
+function smoothPath(pts, passes=3){
+  let out = pts.map(p=>({x:p.x,y:p.y}));
+  for(let k=0;k<passes;k++){
+    const tmp = out.map(p=>({x:p.x,y:p.y}));
+    for(let i=1;i<out.length-1;i++){
+      tmp[i].x=(out[i-1].x+2*out[i].x+out[i+1].x)/4;
+      tmp[i].y=(out[i-1].y+2*out[i].y+out[i+1].y)/4;
+    }
+    out = tmp;
+  }
+  return out;
+}
+function tangentAt(pts,i){ const a=pts[Math.max(0,i-1)], b=pts[Math.min(pts.length-1,i+1)];
+  const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy)||1; return {x:dx/L,y:dy/L}; }
+function normalAt(pts,i){ const t=tangentAt(pts,i); return {x:-t.y,y:t.x}; }
+
+// --- Gait (feet step when hip drifts behind by STRIDE_LEN; alternating groups)
+const legSlots = [7,12,17,22,27,32,37,42,47];
+const legs = legSlots.map((idx,k)=>({
+  idx, side: (k%2? -1:1),
+  planted:{x: chain[idx].x, y: chain[idx].y},
+  air:false, t:0, start:{x:0,y:0}, goal:{x:0,y:0}, group:(k%2)
+}));
+function wantStepFor(leg, body){
+  const hip = body[leg.idx], t = tangentAt(body, leg.idx);
+  const rx = hip.x - leg.planted.x, ry = hip.y - leg.planted.y;
+  const back = -(rx*t.x + ry*t.y);
+  return back > STRIDE_LEN;
+}
+function planStep(leg, body){
+  const hip = body[leg.idx], t = tangentAt(body, leg.idx), n = normalAt(body, leg.idx);
+  const reach = LEG_REACH * (0.7 + (1 - leg.idx/body.length));
+  leg.start = {...leg.planted};
+  leg.goal = { x: hip.x + t.x*LEG_FWD + n.x*reach*leg.side,
+               y: hip.y + t.y*LEG_FWD + n.y*reach*leg.side };
+  leg.air = true; leg.t = 0;
+}
+function updateLegs(body, dt, gaitPhase){
+  const activeGroup = (gaitPhase < 0.5) ? 0 : 1;
+  legs.forEach(leg=>{
+    if(!leg.air && leg.group===activeGroup && wantStepFor(leg, body)){
+      planStep(leg, body);
+    }
+  });
+  legs.forEach(leg=>{
+    if(leg.air){
+      leg.t += dt/STEP_DUR;
+      const p = Math.min(1, leg.t);
+      const s = 0.5 - 0.5*Math.cos(p*Math.PI);     // smooth ease
+      const lift = Math.sin(p*Math.PI)*4;          // little arc
+      leg.planted.x = leg.start.x + (leg.goal.x-leg.start.x)*s;
+      leg.planted.y = leg.start.y + (leg.goal.y-leg.start.y)*s - lift;
+      if(p>=1){ leg.air=false; leg.planted={...leg.goal}; }
+    }
+  });
+}
+function drawLegs(body){
+  ctx.lineWidth=1.2; ctx.strokeStyle="#cfcfcf";
+  legs.forEach(leg=>{
+    const base = body[leg.idx], foot = leg.planted;
+    ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(foot.x, foot.y);
+    const dx=foot.x-base.x, dy=foot.y-base.y, L=Math.hypot(dx,dy)||1, tx=-dy/L, ty=dx/L;
+    ctx.lineTo(foot.x+tx*2, foot.y+ty*2);
+    ctx.moveTo(foot.x, foot.y); ctx.lineTo(foot.x-tx*2, foot.y-ty*2);
+    ctx.stroke();
+  });
+}
+
+// Draw
+function drawBackbone(pts){
+  ctx.lineCap='round';
+  for(let i=0;i<pts.length-1;i++){
+    const a=pts[i], b=pts[i+1];
+    const t = 1 - i/(pts.length-1);
+    const w = 7*(0.35+0.65*Math.pow(t,1.2))*(0.5+0.5*t);
+    ctx.lineWidth=w; ctx.strokeStyle="#cfcfcf";
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+  }
+}
+function drawRings(pts,time,speed){
+  ctx.lineWidth=1; ctx.strokeStyle="#bdbdbd";
+  for(let i=2;i<pts.length-2;i++){
+    const c=pts[i], n=normalAt(pts,i), t=tangentAt(pts,i);
+    const frac = 1 - i/(pts.length-1);
+    const len = 9*frac+3, slide=2;
+    const shim = Math.sin(time*2+i*0.25)*0.25;
+    ctx.beginPath();
+    ctx.moveTo(c.x+n.x*len+t.x*slide, c.y+n.y*len+t.y*slide);
+    ctx.lineTo(c.x-n.x*len+t.x*slide, c.y-n.y*len+t.y*slide);
+    ctx.moveTo(c.x+n.x*len-t.x*slide+shim*n.x, c.y+n.y*len-t.y*slide+shim*n.y);
+    ctx.lineTo(c.x-n.x*len-t.x*slide+shim*n.x, c.y-n.y*len-t.y*slide+shim*n.y);
+    ctx.stroke();
+  }
+}
+function drawHead(pts){
+  const p0=pts[0], t=tangentAt(pts,0), n=normalAt(pts,0);
+  const headLen=20, headW=9;
+  const tip={x:p0.x+t.x*headLen,y:p0.y+t.y*headLen};
+  const jawL={x:p0.x+n.x*headW,y:p0.y+n.y*headW};
+  const jawR={x:p0.x-n.x*headW,y:p0.y-n.y*headW};
+  ctx.lineWidth=2; ctx.strokeStyle="#d6d6d6";
+  ctx.beginPath(); ctx.moveTo(jawL.x,jawL.y); ctx.lineTo(tip.x,tip.y); ctx.lineTo(jawR.x,jawR.y); ctx.stroke();
+  const eye={x:p0.x+n.x*5+t.x*5,y:p0.y+n.y*5+t.y*5}; ctx.beginPath(); ctx.arc(eye.x,eye.y,2,0,Math.PI*2);
+  ctx.fillStyle="#fff"; ctx.fill();
+}
+
+// ---- Main loop with ARRIVAL steering (no bounce) ----------------------------
+let tPrev = performance.now(), gaitClock = 0;
+function loop(tNow=performance.now()){
+  const dt = Math.min(0.033, (tNow - tPrev)/1000); tPrev = tNow;
+  const time = tNow/1000;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // Smooth the cursor target
+  target.x += (raw.x - target.x) * TARGET_SMOOTH;
+  target.y += (raw.y - target.y) * TARGET_SMOOTH;
+
+  // --- Head arrive behavior ---
+  const head = chain[0];
+  let dx = target.x - head.x;
+  let dy = target.y - head.y;
+  let dist = Math.hypot(dx, dy);
+
+  if (dist < STOP_RADIUS) {
+    // stop cleanly and settle slightly ahead along current heading
+    const t = tangentAt(chain, 0);
+    headVel.x = 0; headVel.y = 0;
+    head.x = target.x + t.x * AHEAD_OFFSET;
+    head.y = target.y + t.y * AHEAD_OFFSET;
+  } else {
+    const dirx = dx / dist, diry = dy / dist;
+    const desiredSpeed = MAX_SPEED * Math.min(1, dist / SLOW_RADIUS); // ramp down near target
+    const desiredVelX = dirx * desiredSpeed;
+    const desiredVelY = diry * desiredSpeed;
+
+    // steering = desired - current (limited by MAX_ACCEL)
+    let steerX = desiredVelX - headVel.x;
+    let steerY = desiredVelY - headVel.y;
+    const steerMag = Math.hypot(steerX, steerY);
+    if (steerMag > MAX_ACCEL) {
+      steerX *= MAX_ACCEL / steerMag;
+      steerY *= MAX_ACCEL / steerMag;
+    }
+
+    headVel.x += steerX * dt;
+    headVel.y += steerY * dt;
+    head.x += headVel.x * dt;
+    head.y += headVel.y * dt;
+  }
+
+  // Body follows
+  for(let i=1;i<chain.length;i++) follow(chain[i-1], chain[i]);
+
+  // Speed estimate for tail amplitude
+  const instSpeed = Math.hypot(chain[0].x - prevHead.x, chain[0].y - prevHead.y) / Math.max(dt,1e-6);
+  prevHead = {...chain[0]};
+
+  // Smooth path + tail flick
+  const smooth = smoothPath(chain,3);
+  const flicked = smooth.map((p,i)=>{
+    const frac=i/(smooth.length-1), n=normalAt(smooth,i);
+    const amp=10*Math.pow(frac,2)*(0.25+0.75*Math.min(1,instSpeed/300));
+    const phase=time*2+i*0.25;
+    return {x:p.x+n.x*Math.sin(phase)*amp, y:p.y+n.y*Math.sin(phase)*amp};
+  });
+
+  // Gait (alternate groups)
+  gaitClock = (gaitClock + dt*1.4) % 1;
+  updateLegs(flicked, dt, gaitClock);
+
+  // Draw
+  drawBackbone(flicked);
+  drawRings(flicked, time, instSpeed);
+  drawLegs(flicked);
+  drawHead(flicked);
+
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
