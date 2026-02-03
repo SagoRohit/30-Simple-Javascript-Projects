@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Will You Be My Valentine?</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Pacifico&family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="style.css">
+    
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+</head>
+<body>
+
+    <div class="floating-hearts">
+        <span>💕</span><span>🌸</span><span>💖</span><span>💗</span><span>🌹</span>
+        <span>💕</span><span>🌸</span><span>💖</span><span>💗</span><span>🌹</span>
+    </div>
+
+    <div class="container">
+        
+        <header class="header-names">
+            <p>Sagor asks Garbita 💕</p>
+        </header>
+
+        <div id="proposal-screen">
+            <div id="response-message" class="message-box">Think carefully 😌</div>
+
+            <div class="image-container">
+                <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExajZ4MGl5aGZ1bXk5bXk5bXk5bXk5bXk5bXk5bXk5bXk5bSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/cLS1cfxvGOPVpf9g3y/giphy.gif" 
+                     alt="Cute bear asking" 
+                     id="main-image">
+            </div>
+
+            <h1 class="main-title">Will you be my Valentine? 💘</h1>
+
+            <div class="button-container">
+                <button id="yes-btn" class="btn btn-yes">YES ❤️</button>
+                <button id="no-btn" class="btn btn-no">NO 😐</button>
+            </div>
+        </div>
+
+        <div id="success-screen" class="hidden">
+            <h1 class="success-title">YAYYYY!!! 💕 I knew it!!!</h1>
+            
+            <div class="image-container">
+                <img src="https://media.giphy.com/media/T86i6yDyOYz7J6dPhf/giphy.gif" 
+                     alt="Happy celebration" 
+                     class="success-img">
+            </div>
+
+            <p class="success-subtext">Happy Valentine’s Day, my love 💝</p>
+            <p class="date-display">February 14, 2026</p>
+        </div>
+
+    </div>
+
+    <script src="script.js"></script>
+    <audio id="bg-music" loop>
+    <source src="assets/music.mp3" type="audio/mpeg">
+</audio>
+<script>
+    // Music needs user interaction to play on browsers
+    document.body.addEventListener('click', () => {
+        document.getElementById('bg-music').play();
+    }, { once: true });
+</script>
+<audio id="celebration-music" src="assets/success.mp3" preload="auto"></audio>
+<script src="script.js"></script>
+</body>
+</html>
